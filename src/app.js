@@ -1,4 +1,6 @@
-import { pArrival, sArrival, alertTime, warningTime, blindZoneRadius, pga, shakingLevel, VP, VS } from "./physics.js";
+import { pArrival, sArrival, pga, shakingLevel, VP, VS } from "./physics.js";
+import { seismogram, SAMPLE_RATE } from "./seismogram.js";
+import { staLta, firstTrigger } from "./stalta.js";
 
 // ---- World ----------------------------------------------------------------
 // The map is a 300 km x 225 km area. Seismometer stations sit on a regular
@@ -7,6 +9,8 @@ const WORLD_W = 300, WORLD_H = 225;
 const STATION_SPACING = 40; // km
 const P_WINDOW = 3;  // s of P wave the system waits for before alerting
 const LATENCY = 2;   // s for processing + sending the alert
+const THRESHOLD = 4; // STA/LTA ratio that counts as "earthquake detected"
+const TRACE_S = 40;  // seconds of record shown under the map
 
 const stations = [];
 for (let x = STATION_SPACING / 2; x < WORLD_W; x += STATION_SPACING)
@@ -28,20 +32,40 @@ function nearestStationKm() {
   return Math.min(...stations.map((s) => dist(s, state.quake)));
 }
 
+// The record at the nearest station and what the STA/LTA detector makes of it.
+// Cached, because it only changes when the quake changes, not every frame.
+let traceCache = { key: "", rec: null, ratio: null };
+function nearestRecord(nearKm) {
+  const key = [nearKm.toFixed(2), state.depth, state.magnitude].join("|");
+  if (traceCache.key !== key) {
+    const rec = seismogram({ distanceKm: nearKm, depthKm: state.depth, magnitude: state.magnitude, durationS: TRACE_S });
+    traceCache = { key, rec, ratio: staLta(rec.v, SAMPLE_RATE) };
+  }
+  return traceCache;
+}
+
 function scenario() {
   const userKm = dist(state.phone, state.quake);
   const nearKm = nearestStationKm();
-  const common = { depthKm: state.depth, nearestStationKm: nearKm, pWindow: P_WINDOW, latency: LATENCY };
-  const tAlert = alertTime(common);
+  const { rec, ratio } = nearestRecord(nearKm);
+  // Detection is not the exact P arrival: the detector needs a moment of
+  // signal before the ratio crosses the threshold.
+  const tDetect = firstTrigger(ratio, rec.t, THRESHOLD) ?? pArrival(nearKm, state.depth);
+  const tAlert = tDetect + P_WINDOW + LATENCY;
+  const tS = sArrival(userKm, state.depth);
+  const hypoBlind = VS * tAlert;
   return {
     userKm,
     nearKm,
+    rec,
+    ratio,
     tFirstP: pArrival(nearKm, state.depth),
+    tDetect,
     tAlert,
     tP: pArrival(userKm, state.depth),
-    tS: sArrival(userKm, state.depth),
-    warning: warningTime({ ...common, userKm }),
-    blind: blindZoneRadius(common),
+    tS,
+    warning: tS - tAlert,
+    blind: hypoBlind > state.depth ? Math.sqrt(hypoBlind ** 2 - state.depth ** 2) : 0,
     shaking: shakingLevel(pga(state.magnitude, userKm, state.depth)),
   };
 }
@@ -107,7 +131,64 @@ function draw() {
   ctx.fillText("50 km", 12, canvas.height - 24);
   if (state.t !== null) ctx.fillText(`t = ${state.t.toFixed(1)} s`, canvas.width - 70, 20);
 
+  drawTrace(sc);
   renderPanel(sc);
+}
+
+// ---- Seismogram + detector under the map --------------------------------------
+const trace = document.getElementById("trace");
+const tctx = trace.getContext("2d");
+
+function drawTrace(sc) {
+  const W = trace.width, H = trace.height;
+  const t0 = -5, t1 = Math.max(20, sc.tAlert + 6);      // visible time window (s)
+  const xOf = (t) => ((t - t0) / (t1 - t0)) * W;
+  tctx.clearRect(0, 0, W, H);
+
+  const top = H * 0.62, mid = top / 2;                   // waveform band on top
+  const { t, v } = sc.rec;
+  let peak = 1e-6;
+  for (let i = 0; i < v.length; i++) if (t[i] >= t0 && t[i] <= t1) peak = Math.max(peak, Math.abs(v[i]));
+  const now = state.t ?? t1;                             // draw only what has been "recorded" so far
+
+  tctx.strokeStyle = "#1d1f23"; tctx.lineWidth = 1; tctx.beginPath();
+  let started = false;
+  for (let i = 0; i < v.length; i++) {
+    if (t[i] < t0 || t[i] > Math.min(t1, now)) continue;
+    // square-root scale so the quiet background is still visible next to the S wave
+    const x = xOf(t[i]), y = mid - Math.sign(v[i]) * Math.sqrt(Math.abs(v[i]) / peak) * (mid - 6);
+    started ? tctx.lineTo(x, y) : tctx.moveTo(x, y); started = true;
+  }
+  tctx.stroke();
+
+  // STA/LTA ratio on the bottom band, with the threshold line
+  const base = H - 6, span = H - top - 12, maxR = Math.max(THRESHOLD * 2, 8);
+  const yR = (r) => base - Math.min(r, maxR) / maxR * span;
+  tctx.strokeStyle = "#dedbd4"; tctx.beginPath(); tctx.moveTo(0, base); tctx.lineTo(W, base); tctx.stroke();
+  tctx.setLineDash([4, 4]); tctx.strokeStyle = "#d6452f";
+  tctx.beginPath(); tctx.moveTo(0, yR(THRESHOLD)); tctx.lineTo(W, yR(THRESHOLD)); tctx.stroke(); tctx.setLineDash([]);
+  tctx.strokeStyle = "#2f6fd6"; tctx.lineWidth = 1.5; tctx.beginPath(); started = false;
+  for (let i = 0; i < v.length; i++) {
+    if (t[i] < t0 || t[i] > Math.min(t1, now)) continue;
+    const x = xOf(t[i]), y = yR(sc.ratio[i]);
+    started ? tctx.lineTo(x, y) : tctx.moveTo(x, y); started = true;
+  }
+  tctx.stroke();
+
+  // markers
+  tctx.font = "11px system-ui"; tctx.textBaseline = "top";
+  const mark = (time, color, label, row) => {
+    if (time > now || time < t0 || time > t1) return;
+    const x = xOf(time);
+    tctx.strokeStyle = color; tctx.lineWidth = 1; tctx.beginPath(); tctx.moveTo(x, 0); tctx.lineTo(x, H); tctx.stroke();
+    tctx.fillStyle = color; tctx.fillText(label, x + 3, 2 + row * 13);
+  };
+  mark(0, "#61656c", "fault breaks", 0);
+  mark(sc.tDetect, "#2f6fd6", "detected", 1);
+  mark(sc.tAlert, "#b8860b", "alert sent", 2);
+  tctx.fillStyle = "#61656c"; tctx.textBaseline = "bottom"; tctx.textAlign = "right";
+  tctx.fillText(`STA/LTA ratio (detects at ${THRESHOLD})`, W - 6, yR(THRESHOLD) - 3);
+  tctx.textAlign = "left";
 }
 
 function renderPanel(sc) {
@@ -129,7 +210,8 @@ function renderPanel(sc) {
   const steps = [
     [0, "Fault breaks. P and S waves leave the hypocentre."],
     [sc.tFirstP, `P wave reaches the nearest seismometer (${sc.nearKm.toFixed(0)} km from the quake).`],
-    [sc.tFirstP + P_WINDOW, `After ${P_WINDOW} s of P wave the system estimates the magnitude.`],
+    [sc.tDetect, "Its STA/LTA detector crosses the threshold: earthquake detected."],
+    [sc.tDetect + P_WINDOW, `After ${P_WINDOW} s of P wave the system estimates the magnitude.`],
     [sc.tAlert, `Alert sent; your phone buzzes (+${LATENCY} s for processing and the network).`],
     [sc.tP, "Fast, weak P wave reaches you."],
     [sc.tS, "Slow, strong S wave reaches you: the shaking starts."],

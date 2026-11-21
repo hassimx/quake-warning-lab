@@ -18,3 +18,5 @@ and open http://localhost:8000.
 
 - `src/physics.js`: travel times of P (6.5 km/s) and S (3.6 km/s) waves from a hypocentre at depth, alert time (first P detection + P-wave window + latency), warning time, blind-zone radius and a simplified shaking model.
 - `src/app.js`: the map, stations, wavefront animation and the timeline.
+- `src/seismogram.js`: synthetic record at a station (background noise, weak P packet, strong S packet), starting 15 s before the quake so the detector has a normal baseline.
+- `src/stalta.js`: STA/LTA detector. Short-term energy (0.5 s) divided by long-term energy (10 s); the station triggers when the ratio reaches 4. Detection time from this detector, not the exact P arrival, now drives the alert.

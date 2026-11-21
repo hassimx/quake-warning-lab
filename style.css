@@ -22,6 +22,9 @@ body { margin: 0; background: var(--bg); color: var(--ink);
 .stage, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .stage { padding: 10px; }
 canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #fbfaf7; cursor: crosshair; touch-action: none; }
+.tracebox { margin: 10px 0 0; }
+.tracebox figcaption { font-size: 13px; color: var(--muted); padding: 0 4px 6px; }
+#trace { cursor: default; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 4px 2px; font-size: 13px; color: var(--muted); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .dot.quake { background: var(--quake); }
