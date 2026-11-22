@@ -7,8 +7,6 @@ import { staLta, firstTrigger } from "./stalta.js";
 // grid, like a real dense network (Japan has one roughly every 20-25 km).
 const WORLD_W = 300, WORLD_H = 225;
 const STATION_SPACING = 40; // km
-const P_WINDOW = 3;  // s of P wave the system waits for before alerting
-const LATENCY = 2;   // s for processing + sending the alert
 const THRESHOLD = 4; // STA/LTA ratio that counts as "earthquake detected"
 const TRACE_S = 40;  // seconds of record shown under the map
 
@@ -21,6 +19,8 @@ const state = {
   phone: { x: 230, y: 120 },
   magnitude: 7,
   depth: 15,
+  pWindow: 3,   // s of P wave the system waits for before estimating magnitude
+  latency: 2,   // s for processing + sending the alert through the phone network
   t: null,        // animation clock in seconds, null when idle
   playing: false,
 };
@@ -51,7 +51,7 @@ function scenario() {
   // Detection is not the exact P arrival: the detector needs a moment of
   // signal before the ratio crosses the threshold.
   const tDetect = firstTrigger(ratio, rec.t, THRESHOLD) ?? pArrival(nearKm, state.depth);
-  const tAlert = tDetect + P_WINDOW + LATENCY;
+  const tAlert = tDetect + state.pWindow + state.latency;
   const tS = sArrival(userKm, state.depth);
   const hypoBlind = VS * tAlert;
   return {
@@ -211,8 +211,8 @@ function renderPanel(sc) {
     [0, "Fault breaks. P and S waves leave the hypocentre."],
     [sc.tFirstP, `P wave reaches the nearest seismometer (${sc.nearKm.toFixed(0)} km from the quake).`],
     [sc.tDetect, "Its STA/LTA detector crosses the threshold: earthquake detected."],
-    [sc.tDetect + P_WINDOW, `After ${P_WINDOW} s of P wave the system estimates the magnitude.`],
-    [sc.tAlert, `Alert sent; your phone buzzes (+${LATENCY} s for processing and the network).`],
+    [sc.tDetect + state.pWindow, `After ${state.pWindow} s of P wave the system estimates the magnitude.`],
+    [sc.tAlert, `Alert sent; your phone buzzes (+${state.latency} s for processing and the network).`],
     [sc.tP, "Fast, weak P wave reaches you."],
     [sc.tS, "Slow, strong S wave reaches you: the shaking starts."],
   ].sort((a, b) => a[0] - b[0]);
@@ -246,6 +246,8 @@ function bindSlider(id, key, fmt) {
 }
 bindSlider("mag", "magnitude", (v) => v.toFixed(1));
 bindSlider("depth", "depth", (v) => `${v}`);
+bindSlider("pwin", "pWindow", (v) => `${v.toFixed(1)} s`);
+bindSlider("lat", "latency", (v) => `${v.toFixed(1)} s`);
 
 document.getElementById("play").addEventListener("click", () => {
   const sc = scenario();
