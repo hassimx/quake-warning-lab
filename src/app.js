@@ -21,6 +21,7 @@ const state = {
   depth: 15,
   pWindow: 3,   // s of P wave the system waits for before estimating magnitude
   latency: 2,   // s for processing + sending the alert through the phone network
+  kStations: 2, // how many stations must detect before the system believes it
   t: null,        // animation clock in seconds, null when idle
   playing: false,
 };
@@ -28,29 +29,41 @@ const state = {
 // ---- Helpers ----------------------------------------------------------------
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-function nearestStationKm() {
-  return Math.min(...stations.map((s) => dist(s, state.quake)));
-}
-
-// The record at the nearest station and what the STA/LTA detector makes of it.
-// Cached, because it only changes when the quake changes, not every frame.
-let traceCache = { key: "", rec: null, ratio: null };
-function nearestRecord(nearKm) {
-  const key = [nearKm.toFixed(2), state.depth, state.magnitude].join("|");
-  if (traceCache.key !== key) {
-    const rec = seismogram({ distanceKm: nearKm, depthKm: state.depth, magnitude: state.magnitude, durationS: TRACE_S });
-    traceCache = { key, rec, ratio: staLta(rec.v, SAMPLE_RATE) };
+// Every station near the quake records the shaking and runs its own STA/LTA
+// detector. Only the closest few matter for the first alert, so we simulate
+// those. Cached, because this only changes when the quake changes.
+const SIMULATED = 6;
+let netCache = { key: "", list: [] };
+function network() {
+  const key = [state.quake.x.toFixed(1), state.quake.y.toFixed(1), state.depth, state.magnitude].join("|");
+  if (netCache.key !== key) {
+    const list = stations
+      .map((s, i) => ({ s, i, km: dist(s, state.quake) }))
+      .sort((a, b) => a.km - b.km)
+      .slice(0, SIMULATED)
+      .map((st) => {
+        const rec = seismogram({ distanceKm: st.km, depthKm: state.depth, magnitude: state.magnitude,
+                                 durationS: TRACE_S, seed: 7 + st.i });   // each station has its own noise
+        const ratio = staLta(rec.v, SAMPLE_RATE);
+        return { ...st, rec, ratio, trigger: firstTrigger(ratio, rec.t, THRESHOLD) };
+      });
+    netCache = { key, list };
   }
-  return traceCache;
+  return netCache.list;
 }
 
 function scenario() {
   const userKm = dist(state.phone, state.quake);
-  const nearKm = nearestStationKm();
-  const { rec, ratio } = nearestRecord(nearKm);
-  // Detection is not the exact P arrival: the detector needs a moment of
-  // signal before the ratio crosses the threshold.
-  const tDetect = firstTrigger(ratio, rec.t, THRESHOLD) ?? pArrival(nearKm, state.depth);
+  const net = network();
+  const nearest = net[0];
+  const nearKm = nearest.km;
+  const { rec, ratio } = nearest;
+  // The system only believes it is an earthquake once K different stations
+  // have triggered. Detection is not the exact P arrival: each detector needs
+  // a moment of signal before its ratio crosses the threshold.
+  const triggers = net.map((st) => st.trigger).filter((t) => t !== null).sort((a, b) => a - b);
+  const k = Math.min(state.kStations, triggers.length);
+  const tDetect = k > 0 ? triggers[k - 1] : pArrival(nearKm, state.depth);
   const tAlert = tDetect + state.pWindow + state.latency;
   const tS = sArrival(userKm, state.depth);
   const hypoBlind = VS * tAlert;
@@ -59,6 +72,7 @@ function scenario() {
     nearKm,
     rec,
     ratio,
+    net,
     tFirstP: pArrival(nearKm, state.depth),
     tDetect,
     tAlert,
@@ -99,9 +113,10 @@ function draw() {
   ctx.setLineDash([5, 5]); ctx.strokeStyle = "rgba(214,69,47,0.5)"; ctx.stroke(); ctx.setLineDash([]);
 
   // stations
-  for (const s of stations) {
+  const triggeredNow = new Set(sc.net.filter((st) => st.trigger !== null && state.t !== null && state.t >= st.trigger).map((st) => st.i));
+  for (const [i, s] of stations.entries()) {
     const p = toPx(s);
-    ctx.fillStyle = "#8a8f98";
+    ctx.fillStyle = triggeredNow.has(i) ? "#2f6fd6" : "#8a8f98";
     ctx.beginPath(); ctx.moveTo(p.x, p.y - 5); ctx.lineTo(p.x + 4.5, p.y + 3); ctx.lineTo(p.x - 4.5, p.y + 3); ctx.closePath(); ctx.fill();
   }
 
@@ -210,7 +225,9 @@ function renderPanel(sc) {
   const steps = [
     [0, "Fault breaks. P and S waves leave the hypocentre."],
     [sc.tFirstP, `P wave reaches the nearest seismometer (${sc.nearKm.toFixed(0)} km from the quake).`],
-    [sc.tDetect, "Its STA/LTA detector crosses the threshold: earthquake detected."],
+    [sc.tDetect, state.kStations > 1
+      ? `${state.kStations} stations have triggered: the system is confident it is an earthquake.`
+      : "Its STA/LTA detector crosses the threshold: earthquake detected."],
     [sc.tDetect + state.pWindow, `After ${state.pWindow} s of P wave the system estimates the magnitude.`],
     [sc.tAlert, `Alert sent; your phone buzzes (+${state.latency} s for processing and the network).`],
     [sc.tP, "Fast, weak P wave reaches you."],
@@ -248,6 +265,7 @@ bindSlider("mag", "magnitude", (v) => v.toFixed(1));
 bindSlider("depth", "depth", (v) => `${v}`);
 bindSlider("pwin", "pWindow", (v) => `${v.toFixed(1)} s`);
 bindSlider("lat", "latency", (v) => `${v.toFixed(1)} s`);
+bindSlider("kst", "kStations", (v) => `${v}`);
 
 document.getElementById("play").addEventListener("click", () => {
   const sc = scenario();
