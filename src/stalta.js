@@ -26,9 +26,11 @@ export function staLta(v, sampleRate, { staS = 0.5, ltaS = 10 } = {}) {
   return ratio;
 }
 
-// First time (from the matching time array `t`) the ratio reaches the threshold.
-export function firstTrigger(ratio, t, threshold) {
+// First time (from the matching time array `t`) the ratio reaches the
+// threshold, optionally only within [fromS, toS).
+export function firstTrigger(ratio, t, threshold, fromS = -Infinity, toS = Infinity) {
   for (let i = 0; i < ratio.length; i++) {
+    if (t[i] < fromS || t[i] >= toS) continue;
     if (ratio[i] >= threshold) return t[i];
   }
   return null;

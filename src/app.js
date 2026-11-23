@@ -22,6 +22,7 @@ const state = {
   pWindow: 3,   // s of P wave the system waits for before estimating magnitude
   latency: 2,   // s for processing + sending the alert through the phone network
   kStations: 2, // how many stations must detect before the system believes it
+  truck: false, // a heavy truck passes the nearest station 4 s before the quake
   t: null,        // animation clock in seconds, null when idle
   playing: false,
 };
@@ -33,19 +34,28 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // detector. Only the closest few matter for the first alert, so we simulate
 // those. Cached, because this only changes when the quake changes.
 const SIMULATED = 6;
+const TRUCK_T = -4; // s: the truck passes the nearest station before the fault breaks
 let netCache = { key: "", list: [] };
 function network() {
-  const key = [state.quake.x.toFixed(1), state.quake.y.toFixed(1), state.depth, state.magnitude].join("|");
+  const key = [state.quake.x.toFixed(1), state.quake.y.toFixed(1), state.depth, state.magnitude, state.truck].join("|");
   if (netCache.key !== key) {
     const list = stations
       .map((s, i) => ({ s, i, km: dist(s, state.quake) }))
       .sort((a, b) => a.km - b.km)
       .slice(0, SIMULATED)
-      .map((st) => {
+      .map((st, rank) => {
+        // A truck is local: only the one station next to the road feels it.
+        const bursts = state.truck && rank === 0 ? [{ t: TRUCK_T, amp: 5 }] : [];
         const rec = seismogram({ distanceKm: st.km, depthKm: state.depth, magnitude: state.magnitude,
-                                 durationS: TRACE_S, seed: 7 + st.i });   // each station has its own noise
+                                 durationS: TRACE_S, seed: 7 + st.i, bursts });   // each station has its own noise
         const ratio = staLta(rec.v, SAMPLE_RATE);
-        return { ...st, rec, ratio, trigger: firstTrigger(ratio, rec.t, THRESHOLD) };
+        return {
+          ...st, rec, ratio,
+          // what the detector sees before the quake (only noise or a truck) ...
+          falseTrigger: firstTrigger(ratio, rec.t, THRESHOLD, -Infinity, 0),
+          // ... and the real earthquake
+          trigger: firstTrigger(ratio, rec.t, THRESHOLD, 0),
+        };
       });
     netCache = { key, list };
   }
@@ -62,6 +72,9 @@ function scenario() {
   // have triggered. Detection is not the exact P arrival: each detector needs
   // a moment of signal before its ratio crosses the threshold.
   const triggers = net.map((st) => st.trigger).filter((t) => t !== null).sort((a, b) => a - b);
+  // Before the quake, does the network wrongly believe there is one?
+  const falseTriggers = net.map((st) => st.falseTrigger).filter((t) => t !== null).sort((a, b) => a - b);
+  const falseAlarm = falseTriggers.length >= state.kStations ? falseTriggers[state.kStations - 1] : null;
   const k = Math.min(state.kStations, triggers.length);
   const tDetect = k > 0 ? triggers[k - 1] : pArrival(nearKm, state.depth);
   const tAlert = tDetect + state.pWindow + state.latency;
@@ -73,6 +86,8 @@ function scenario() {
     rec,
     ratio,
     net,
+    falseTriggers,
+    falseAlarm,
     tFirstP: pArrival(nearKm, state.depth),
     tDetect,
     tAlert,
@@ -198,6 +213,7 @@ function drawTrace(sc) {
     tctx.strokeStyle = color; tctx.lineWidth = 1; tctx.beginPath(); tctx.moveTo(x, 0); tctx.lineTo(x, H); tctx.stroke();
     tctx.fillStyle = color; tctx.fillText(label, x + 3, 2 + row * 13);
   };
+  if (state.truck) mark(TRUCK_T, "#8a6d3b", "truck", 0);
   mark(0, "#61656c", "fault breaks", 0);
   mark(sc.tDetect, "#2f6fd6", "detected", 1);
   mark(sc.tAlert, "#b8860b", "alert sent", 2);
@@ -219,6 +235,21 @@ function renderPanel(sc) {
       <div>You are inside the blind zone: the strong S wave reaches you
       ${(-sc.warning).toFixed(1)} s before the alert can.</div>
       <div class="sub">Expected shaking: ${sc.shaking.label}.</div>`;
+  }
+
+  const fa = document.getElementById("falseAlarm");
+  if (!state.truck) {
+    fa.hidden = true;
+  } else if (sc.falseAlarm !== null) {
+    fa.hidden = false; fa.className = "notice bad";
+    fa.innerHTML = `<b>False alarm!</b> A truck shook the nearest station at ${TRUCK_T} s, before any earthquake.
+      With only 1 station needed, the system believed it and woke up the whole city.
+      Try setting "Stations that must agree" to 2.`;
+  } else {
+    fa.hidden = false; fa.className = "notice good";
+    fa.innerHTML = `<b>No false alarm.</b> The truck shook one station${sc.falseTriggers.length ? " and it triggered" : ""},
+      but the stations around it felt nothing, so the network ignored it.
+      Real early-warning systems wait for several stations for exactly this reason.`;
   }
 
   const t = state.t ?? -1;
@@ -266,6 +297,13 @@ bindSlider("depth", "depth", (v) => `${v}`);
 bindSlider("pwin", "pWindow", (v) => `${v.toFixed(1)} s`);
 bindSlider("lat", "latency", (v) => `${v.toFixed(1)} s`);
 bindSlider("kst", "kStations", (v) => `${v}`);
+
+document.getElementById("truck").addEventListener("click", (e) => {
+  state.truck = !state.truck;
+  e.currentTarget.setAttribute("aria-pressed", String(state.truck));
+  e.currentTarget.textContent = state.truck ? "🚚 Truck: on" : "🚚 Send a truck past the station";
+  draw();
+});
 
 document.getElementById("play").addEventListener("click", () => {
   const sc = scenario();
