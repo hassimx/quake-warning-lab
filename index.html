@@ -10,11 +10,16 @@
 <body>
 <header class="top">
   <h1>Quake Warning Lab</h1>
-  <p class="lead">How can your phone buzz <em>before</em> the shaking starts? Click the map to place an earthquake, then press <b>Play</b>.</p>
+  <p class="lead">How can your phone buzz <em>before</em> the shaking starts? Click the map to place an earthquake, then press <b>Play</b>.
+    <button id="replayTour" class="linklike">Show me the 30-second tour</button></p>
 </header>
 
 <main class="layout">
   <section class="stage">
+    <div id="tour" class="tour" hidden role="dialog" aria-live="polite" aria-label="Guided tour">
+      <div class="tour-text"></div>
+      <div class="tour-actions"><button id="tourSkip" class="linklike">Skip</button><button id="tourNext" class="primary small">Next ▶</button></div>
+    </div>
     <canvas id="map" width="720" height="540" aria-label="Map: click to move the earthquake, drag the phone"></canvas>
     <div class="legend">
       <span><i class="dot quake"></i>earthquake</span>
@@ -55,6 +60,8 @@
       </label>
     </div>
 
+    <section id="learned" class="card" hidden></section>
+    <section id="feel" class="card" hidden></section>
     <ol class="timeline" id="timeline"></ol>
   </aside>
 </main>

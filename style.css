@@ -59,6 +59,21 @@ button.secondary[aria-pressed="true"] { background: #fff4db; border-color: #e0b8
 .timeline li.done::before { background: var(--ink); }
 .timeline b { font-variant-numeric: tabular-nums; }
 
+
+.stage { position: relative; }
+.tour { position: absolute; left: 20px; right: 20px; top: 20px; z-index: 2; background: #1d1f23; color: #fff;
+  border-radius: 10px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 15px; }
+.tour-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+.tour .linklike { color: #c9ccd1; }
+button.small { padding: 6px 12px; background: #fff; color: #1d1f23; }
+.linklike { background: none; border: none; padding: 0; font: inherit; color: var(--p); text-decoration: underline; cursor: pointer; }
+.card { background: #faf9f6; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+.card h3 { margin: 0 0 6px; font-size: 15px; }
+.card ol { margin: 0; padding-left: 18px; }
+.card li { margin-bottom: 4px; }
+.card p { margin: 6px 0; }
+.card .sub { color: var(--muted); font-size: 12px; }
+
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; padding: 10px 16px 24px; }
   .top { padding: 16px 16px 4px; }

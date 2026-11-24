@@ -305,18 +305,95 @@ document.getElementById("truck").addEventListener("click", (e) => {
   draw();
 });
 
-document.getElementById("play").addEventListener("click", () => {
-  const sc = scenario();
-  const end = sc.tS + 3;
-  state.t = 0; state.playing = true;
+// Run the clock from state.t (or 0) up to `until` seconds, then call `done`.
+let animId = 0;
+function animate(until, done) {
+  const id = ++animId;                 // a newer animation cancels an older one
+  if (state.t === null) state.t = 0;
+  state.playing = true;
   let last = performance.now();
-  const speed = 2; // simulated seconds per real second
+  const speed = 2;                     // simulated seconds per real second
   function frame(now) {
-    state.t = Math.min(end, state.t + ((now - last) / 1000) * speed);
+    if (id !== animId) return;
+    state.t = Math.min(until, state.t + ((now - last) / 1000) * speed);
     last = now; draw();
-    if (state.t < end) requestAnimationFrame(frame); else state.playing = false;
+    if (state.t < until) requestAnimationFrame(frame);
+    else { state.playing = false; done && done(); }
   }
   requestAnimationFrame(frame);
+}
+
+document.getElementById("play").addEventListener("click", () => {
+  state.t = 0;
+  animate(scenario().tS + 3, showLearned);
 });
 
+// ---- "What you just learned" -------------------------------------------------
+function showLearned() {
+  const sc = scenario();
+  const card = document.getElementById("learned");
+  card.hidden = false;
+  card.innerHTML = `<h3>What you just saw</h3>
+    <ol>
+      <li><b>Two waves.</b> The P wave (blue) is fast but weak. The S wave (red) is slow and does the damage.</li>
+      <li><b>A race the internet wins.</b> A seismometer near the quake caught the P wave, and the alert flew to
+        your phone at network speed, ${sc.warning > 0 ? `${sc.warning.toFixed(1)} s before the S wave arrived` : "but here the S wave still won"}.</li>
+      <li><b>Distance is your friend.</b> Far away you get more warning. Inside the red dashed circle (the blind zone)
+        the shaking always arrives first.</li>
+    </ol>
+    <p class="sub">Now try: drag your phone closer, make the quake deeper, or send a truck past the station.</p>`;
+  renderFeel(sc);
+}
+
+// ---- "Feel it yourself": estimate distance from the S-P gap --------------------
+function renderFeel(sc) {
+  const box = document.getElementById("feel");
+  box.hidden = false;
+  const gap = sc.tS - sc.tP;
+  const est = gap * 8;
+  box.innerHTML = `<h3>Feel it yourself</h3>
+    <p>At your phone the weak P wave arrived at <b>${sc.tP.toFixed(1)} s</b> and the strong S wave at
+    <b>${sc.tS.toFixed(1)} s</b>: a gap of <b>${gap.toFixed(1)} s</b>.</p>
+    <p>Rule of thumb: every second of gap is about 8 km, so the quake was about
+    <b>${gap.toFixed(1)} × 8 ≈ ${est.toFixed(0)} km</b> away. The real distance is
+    <b>${Math.hypot(sc.userKm, state.depth).toFixed(0)} km</b> (counting the depth).</p>
+    <p class="sub">Why 8? In one second the P wave travels ${VP} km and the S wave ${VS} km, so the gap grows by
+    1/${VS} − 1/${VP} ≈ 0.12 s per km, which is 1 s per ~8 km.</p>`;
+}
+
+// ---- First-visit guided tour -------------------------------------------------
+const tour = document.getElementById("tour");
+const tourSteps = [
+  { text: () => `<b>1/3</b> The black dot is an earthquake. The green phone is you, ${scenario().userKm.toFixed(0)} km away.
+      Grey triangles are seismometers.`, until: null },
+  { text: () => `<b>2/3</b> The fast blue P wave reaches the nearest seismometers. They notice it (they turn blue)
+      and the system sends an alert through the network, much faster than any wave.`, until: () => scenario().tAlert + 0.5 },
+  { text: () => { const w = scenario().warning;
+      return `<b>3/3</b> The slow red S wave brings the strong shaking. ${w > 0
+        ? `Your phone buzzed <b>${w.toFixed(1)} s</b> before it reached you. That is your warning.`
+        : "Here it reached you before the alert: you are in the blind zone."}`; }, until: () => scenario().tS + 1 },
+];
+let tourStep = 0;
+function showTourStep() {
+  const st = tourSteps[tourStep];
+  tour.hidden = false;
+  tour.querySelector(".tour-text").innerHTML = st.text();
+  tour.querySelector("#tourNext").textContent = tourStep < tourSteps.length - 1 ? "Next ▶" : "Done";
+  if (st.until) animate(st.until(), () => { tour.querySelector(".tour-text").innerHTML = st.text(); });
+}
+function startTour() { state.t = 0; tourStep = 0; draw(); showTourStep(); }
+function endTour() {
+  tour.hidden = true;
+  try { localStorage.setItem("qwl-tour-done", "1"); } catch (e) { /* storage may be blocked */ }
+  showLearned();
+}
+document.getElementById("tourNext").addEventListener("click", () => {
+  if (tourStep < tourSteps.length - 1) { tourStep++; showTourStep(); } else endTour();
+});
+document.getElementById("tourSkip").addEventListener("click", () => { animId++; state.t = null; endTour(); draw(); });
+document.getElementById("replayTour").addEventListener("click", startTour);
+
 draw();
+let seen = false;
+try { seen = localStorage.getItem("qwl-tour-done") === "1"; } catch (e) { /* ignore */ }
+if (!seen) startTour();
