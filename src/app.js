@@ -211,12 +211,15 @@ function drawTrace(sc) {
     if (time > now || time < t0 || time > t1) return;
     const x = xOf(time);
     tctx.strokeStyle = color; tctx.lineWidth = 1; tctx.beginPath(); tctx.moveTo(x, 0); tctx.lineTo(x, H); tctx.stroke();
+    // light backing so the label stays readable on top of the waveform
+    const w = tctx.measureText(label).width;
+    tctx.fillStyle = "rgba(251,250,247,0.9)"; tctx.fillRect(x + 1, 1 + row * 13, w + 4, 13);
     tctx.fillStyle = color; tctx.fillText(label, x + 3, 2 + row * 13);
   };
   if (state.truck) mark(TRUCK_T, "#8a6d3b", "truck", 0);
   mark(0, "#61656c", "fault breaks", 0);
   mark(sc.tDetect, "#2f6fd6", "detected", 1);
-  mark(sc.tAlert, "#b8860b", "alert sent", 2);
+  mark(sc.tAlert, "#8a6400", "alert sent", 2);
   tctx.fillStyle = "#61656c"; tctx.textBaseline = "bottom"; tctx.textAlign = "right";
   tctx.fillText(`STA/LTA ratio (detects at ${THRESHOLD})`, W - 6, yR(THRESHOLD) - 3);
   tctx.textAlign = "left";
@@ -279,17 +282,46 @@ let dragging = false;
 canvas.addEventListener("pointerdown", (e) => {
   const w = eventToWorld(e);
   if (dist(w, state.phone) < 12) { dragging = true; canvas.setPointerCapture(e.pointerId); return; }
-  state.quake = w; state.t = null; draw();
+  state.quake = w; state.t = null; draw(); announce();
 });
 canvas.addEventListener("pointermove", (e) => {
   if (!dragging) return;
   state.phone = eventToWorld(e); draw();
 });
-canvas.addEventListener("pointerup", () => { dragging = false; });
+canvas.addEventListener("pointerup", () => { dragging = false; announce(); });
+
+// Keyboard: arrows move the quake, Shift + arrows move the phone, Enter plays.
+// Each press moves 5 km (Alt for 1 km), so the map works without a mouse.
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+canvas.addEventListener("keydown", (e) => {
+  const step = e.altKey ? 1 : 5;
+  const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+  if (d) {
+    e.preventDefault();
+    const target = e.shiftKey ? state.phone : state.quake;
+    target.x = clamp(target.x + d[0], 0, WORLD_W);
+    target.y = clamp(target.y + d[1], 0, WORLD_H);
+    if (!e.shiftKey) state.t = null;
+    draw(); announce();
+  } else if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    document.getElementById("play").click();
+  }
+});
+
+// Screen readers cannot see the canvas, so describe the map in words. Only
+// called after a move, not on every animation frame.
+function announce() {
+  const sc = scenario();
+  document.getElementById("mapStatus").textContent =
+    `Earthquake ${state.quake.x.toFixed(0)} km from the left edge and ${state.quake.y.toFixed(0)} km from the top of the map. ` +
+    `Your phone is ${sc.userKm.toFixed(0)} km away. ` +
+    (sc.warning > 0 ? `${sc.warning.toFixed(1)} seconds of warning.` : "No warning: you are in the blind zone.");
+}
 
 function bindSlider(id, key, fmt) {
   const el = document.getElementById(id), out = document.getElementById(id + "Out");
-  const update = () => { state[key] = Number(el.value); out.textContent = fmt(state[key]); draw(); };
+  const update = () => { state[key] = Number(el.value); out.textContent = fmt(state[key]); draw(); announce(); };
   el.addEventListener("input", update); update();
 }
 bindSlider("mag", "magnitude", (v) => v.toFixed(1));
@@ -394,6 +426,7 @@ document.getElementById("tourSkip").addEventListener("click", () => { animId++; 
 document.getElementById("replayTour").addEventListener("click", startTour);
 
 draw();
+announce();
 let seen = false;
 try { seen = localStorage.getItem("qwl-tour-done") === "1"; } catch (e) { /* ignore */ }
 if (!seen) startTour();

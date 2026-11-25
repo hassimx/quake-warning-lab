@@ -20,7 +20,11 @@
       <div class="tour-text"></div>
       <div class="tour-actions"><button id="tourSkip" class="linklike">Skip</button><button id="tourNext" class="primary small">Next ▶</button></div>
     </div>
-    <canvas id="map" width="720" height="540" aria-label="Map: click to move the earthquake, drag the phone"></canvas>
+    <canvas id="map" width="720" height="540" tabindex="0" aria-describedby="mapHelp mapStatus"
+      aria-label="Map. Click to move the earthquake, drag the phone."></canvas>
+    <p id="mapHelp" class="hint keys">Keyboard: click the map or press Tab to focus it, then use the arrow keys to move the quake,
+      Shift + arrows to move your phone, Enter to play.</p>
+    <p id="mapStatus" class="sr-only" aria-live="polite"></p>
     <div class="legend">
       <span><i class="dot quake"></i>earthquake</span>
       <span><i class="dot phone"></i>you (drag)</span>
@@ -34,7 +38,7 @@
   </section>
 
   <aside class="panel">
-    <div class="result" id="result" aria-live="polite"></div>
+    <div class="result" id="result"></div>
     <div id="falseAlarm" class="notice" hidden aria-live="polite"></div>
 
     <div class="controls">
